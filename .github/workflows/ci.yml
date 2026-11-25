@@ -1,8 +1,12 @@
 name: ci
 
 on:
-- pull_request
-- push
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: 'Optional mocha args selecting a subset of tests (empty runs the full suite)'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -13,6 +17,7 @@ jobs:
       checks: write  # for coverallsapp/github-action to create new checks
       contents: read  # for actions/checkout to fetch code
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       matrix:
         name:
@@ -197,33 +202,37 @@ jobs:
 
     - name: Run tests
       shell: bash
+      env:
+        TEST_FILTER: ${{ inputs.test-filter }}
       run: |
-        if npm -ps ls nyc | grep -q nyc; then
+        if [ -n "${{ inputs.test-filter }}" ]; then
+          ./node_modules/.bin/mocha --check-leaks --reporter spec $TEST_FILTER
+        elif npm -ps ls nyc | grep -q nyc; then
           npm run test-ci
         else
           npm test
         fi
 
-    - name: Lint code
-      if: steps.list_env.outputs.eslint != ''
-      run: npm run lint
-
-    - name: Collect code coverage
-      uses: coverallsapp/github-action@09b709cf6a16e30b0808ba050c7a6e8a5ef13f8d # master
-      if: steps.list_env.outputs.nyc != ''
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        flag-name: run-${{ matrix.test_number }}
-        parallel: true
-
-  coverage:
-    permissions:
-      checks: write  # for coverallsapp/github-action to create new checks
-    needs: test
+  pack:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-    - name: Upload code coverage
-      uses: coverallsapp/github-action@09b709cf6a16e30b0808ba050c7a6e8a5ef13f8d # master
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+    - name: Install Node.js 22.10.0
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
       with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        parallel-finished: true
+        node-version: "22.10.0"
+
+    - name: Pack
+      run: |
+        echo "node@$(node -v)"
+        echo "npm@$(npm -v)"
+        npm pack
+
+    - name: Upload package tarball
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: morgan-tgz
+        path: ./morgan-*.tgz
+        if-no-files-found: error
