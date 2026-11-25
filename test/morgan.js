@@ -553,6 +553,128 @@ describe('morgan()', function () {
           .expect(200, cb)
       })
 
+      it('should escape CR/LF control characters', function (done) {
+        var lines = []
+        var cb = after(2, function (err, res) {
+          if (err) return done(err)
+          assert.strictEqual(lines.length, 1)
+          assert.strictEqual(lines[0].indexOf('\r'), -1)
+          assert.strictEqual(lines[0].indexOf('\n'), -1)
+          assert.strictEqual(lines[0], 'evil\\r\\ninjected')
+          done()
+        })
+
+        var stream = createLineStream(function (line) {
+          lines.push(line)
+          if (lines.length === 1) cb(null, null)
+        })
+
+        // 'evil\r\ninjected:x' in Base64
+        request(createServer(':remote-user', { stream: stream }))
+          .get('/')
+          .set('Authorization', 'Basic ZXZpbA0KaW5qZWN0ZWQ6eA==')
+          .expect(200, cb)
+      })
+
+      it('should escape null bytes', function (done) {
+        var cb = after(2, function (err, res, line) {
+          if (err) return done(err)
+          assert.strictEqual(line.indexOf('\x00'), -1)
+          assert.strictEqual(line, 'evil\\u0000null')
+          done()
+        })
+
+        var stream = createLineStream(function (line) {
+          cb(null, null, line)
+        })
+
+        // 'evil\x00null:x' in Base64
+        request(createServer(':remote-user', { stream: stream }))
+          .get('/')
+          .set('Authorization', 'Basic ZXZpbABudWxsOng=')
+          .expect(200, cb)
+      })
+
+      it('should escape tab and escape characters', function (done) {
+        var cb = after(2, function (err, res, line) {
+          if (err) return done(err)
+          assert.strictEqual(line.indexOf('\t'), -1)
+          assert.strictEqual(line.indexOf('\x1b'), -1)
+          assert.strictEqual(line, 'evil\\t\\u001buser')
+          done()
+        })
+
+        var stream = createLineStream(function (line) {
+          cb(null, null, line)
+        })
+
+        // 'evil\t\x1buser:x' in Base64
+        request(createServer(':remote-user', { stream: stream }))
+          .get('/')
+          .set('Authorization', 'Basic ZXZpbAkbdXNlcjp4')
+          .expect(200, cb)
+      })
+
+      it('should not forge additional log lines via CRLF injection', function (done) {
+        var lines = []
+        var cb = after(2, function (err, res) {
+          if (err) return done(err)
+
+          // must produce exactly one log line, not two
+          assert.strictEqual(lines.length, 1)
+          assert.strictEqual(lines[0].indexOf('\r'), -1)
+          assert.strictEqual(lines[0].indexOf('\n'), -1)
+          assert.strictEqual(lines[0], '- [01/Jan/1970 00-00-00 +0000] "GET /injected HTTP/1.1" 200 - "-" "curl/8.14.1"\\r\\n192.0.2.0 - - ')
+          done()
+        })
+
+        var stream = createLineStream(function (line) {
+          lines.push(line)
+          if (lines.length === 1) cb(null, null)
+        })
+
+        // Full log forging payload from advisory PoC
+        request(createServer(':remote-user', { stream: stream }))
+          .get('/')
+          .set('Authorization', 'Basic LSBbMDEvSmFuLzE5NzAgMDAtMDAtMDAgKzAwMDBdICJHRVQgL2luamVjdGVkIEhUVFAvMS4xIiAyMDAgLSAiLSIgImN1cmwvOC4xNC4xIg0KMTkyLjAuMi4wIC0gLSA6eA==')
+          .expect(200, cb)
+      })
+
+      it('should not affect legitimate usernames', function (done) {
+        var cb = after(2, function (err, res, line) {
+          if (err) return done(err)
+          assert.strictEqual(line, 'tj')
+          done()
+        })
+
+        var stream = createLineStream(function (line) {
+          cb(null, null, line)
+        })
+
+        request(createServer(':remote-user', { stream: stream }))
+          .get('/')
+          .set('Authorization', 'Basic dGo6')
+          .expect(200, cb)
+      })
+
+      it('should escape backslashes', function (done) {
+        var cb = after(2, function (err, res, line) {
+          if (err) return done(err)
+          assert.strictEqual(line, 'evil\\\\nuser')
+          done()
+        })
+
+        var stream = createLineStream(function (line) {
+          cb(null, null, line)
+        })
+
+        // 'evil\nuser:x' (literal backslash) in Base64
+        request(createServer(':remote-user', { stream: stream }))
+          .get('/')
+          .set('Authorization', 'Basic ZXZpbFxudXNlcjp4')
+          .expect(200, cb)
+      })
+
       it('should be empty for empty Basic authorization user', function (done) {
         var cb = after(2, function (err, res, line) {
           if (err) return done(err)
